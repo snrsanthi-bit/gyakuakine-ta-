@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum GameStatus {
+  ACTIVE
+  CLEARED
+  ABANDONED
+}
+
+enum TurnKind {
+  QUESTION
+  GUESS
+}
+
+enum CachedAnswer {
+  yes
+  no
+  unknown
+}
+
+model Person {
+  id        String   @id
+  name      String
+  genre     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  answers   Answer[]
+  aliases   Alias[]
+}
+
+model Alias {
+  id              String   @id @default(cuid())
+  personId        String
+  value           String
+  normalizedValue String   @unique
+  createdAt       DateTime @default(now())
+  person          Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([personId])
+}
+
+model Question {
+  id        String   @id @default(cuid())
+  text      String   @unique
+  createdAt DateTime @default(now())
+  answers   Answer[]
+}
+
+model Answer {
+  personId   String
+  questionId String
+  answer     CachedAnswer
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  person     Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@id([personId, questionId])
+  @@index([questionId])
+}
+
+model Game {
+  id            String     @id @default(cuid())
+  subjectId     String
+  status        GameStatus @default(ACTIVE)
+  questionCount Int        @default(0)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  turns         Turn[]
+}
+
+model Turn {
+  id        String   @id @default(cuid())
+  gameId    String
+  kind      TurnKind
+  prompt    String
+  answer    String?
+  correct   Boolean?
+  createdAt DateTime @default(now())
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([gameId, createdAt])
+}

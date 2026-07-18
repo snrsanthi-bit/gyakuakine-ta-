@@ -1,0 +1,38 @@
+# 逆アキネーター
+
+AIが考えている著名な実在人物を、質問で当てるローカルWebゲームです。AIの通常回答は必ず「はい」「いいえ」「どちらとも言えない」のいずれかになります。
+
+## 起動方法
+
+1. `.env.example` を `.env.local` にコピーし、`GEMINI_API_KEY` を設定します。
+2. `npm run prisma:generate` を実行します。
+3. `npm run prisma:migrate -- --name init` を実行します。
+4. `npm run dev` を実行し、http://localhost:3000 を開きます。
+
+`GEMINI_MODEL` の既定値は `gemini-3.5-flash` です。利用可能なモデルに変更したい場合は `.env.local` で上書きできます。
+
+## 開発コマンド
+
+- `npm run lint` — ESLint
+- `npm run typecheck` — TypeScript型検査
+- `npm test` — ユニットテスト
+- `npm run test:e2e` — Playwrightテスト
+
+## MVPの制約
+
+- お題はサーバー内の許可リストからAIが選びます。
+- お題と候補リストは、正解するまでブラウザへ送られません。
+- セッションはHTTP-only CookieとSQLiteで、ページ更新後も再開できます。
+- 1ゲームあたりの質問は100回、1質問は500文字までです。
+
+## 質問キャッシュ
+
+通常質問は、人物IDと完全一致する質問文をキーとしてSQLiteに保存します。まず `Person`、`Question`、`Answer` を確認し、同一人物への同一質問にキャッシュ済み回答があればGemini APIを呼びません。キャッシュがない場合だけGeminiへ問い合わせ、回答を `yes / no / unknown` 相当の値で保存します。
+
+質問文の意味的な正規化はMVPの対象外です。たとえば「日本人ですか？」と「日本出身ですか？」は別の質問として扱われます。
+
+## 回答エイリアス
+
+人物名の推測は、まずSQLiteの `Alias` テーブルで判定します。既知の表示名・別名と、過去にGeminiが承認した呼称はAPIを使わずに判定されます。
+
+未登録の呼称だけをGeminiへJSON構造化出力で問い合わせます。Geminiが `yes` と判定した呼称だけをAliasとして保存するため、次回以降はDBのみで判定します。Geminiが `no` または `unknown` と判定した曖昧な呼称は正解にせず、保存もしません。
