@@ -13,8 +13,20 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json({ game: await askQuestion(gameId, parsed.data.question) });
   } catch (error) {
-    const status = error instanceof GameAiError ? 503 : error instanceof GameStateError ? 409 : 500;
-    const message = error instanceof Error ? error.message : "質問を送信できませんでした。";
-    return NextResponse.json({ error: message }, { status });
-  }
+    if (error instanceof GameAiError) {
+       return NextResponse.json(
+       {
+          error:
+          "現在AIの利用上限に達しているため、ご利用いただけません。\n\n試作版のため、ご利用回数に制限があります。\nしばらく時間を空けてから再度お試しください。",
+        },
+        { status: 503 },
+      );
+    }
+
+  const status = error instanceof GameStateError ? 409 : 500;
+  const message =
+    error instanceof Error ? error.message : "質問を送信できませんでした。";
+
+  return NextResponse.json({ error: message }, { status });
+}
 }
