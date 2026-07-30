@@ -2,6 +2,7 @@ export type Candidate = {
   id: string;
   name: string;
   aliases: string[];
+  genre?: string;
 };
 
 export const candidates: Candidate[] = [

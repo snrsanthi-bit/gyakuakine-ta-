@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { parseAiAnswer, type Answer } from "@/lib/validation";
-import { GameAiError, type AliasContext, type AliasJudgement, type GameAiProvider, type QuestionContext } from "@/lib/ai/types";
+import { GameAiError, type AliasContext, type AliasJudgement, type GameAiProvider, type GameBootstrap, type QuestionContext } from "@/lib/ai/types";
 
 const answerSchema = {
   type: "object",
@@ -14,6 +14,29 @@ const aliasJudgementSchema = {
   additionalProperties: false,
   properties: { judgement: { type: "string", enum: ["yes", "no", "unknown"] } },
   required: ["judgement"],
+};
+
+const bootstrapSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    people: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          genre: { type: "string" },
+          aliases: { type: "array", items: { type: "string" } },
+        },
+        required: ["id", "name", "genre", "aliases"],
+      },
+    },
+    questions: { type: "array", items: { type: "string" } },
+  },
+  required: ["people", "questions"],
 };
 
 function getClient(): GoogleGenAI {
@@ -35,26 +58,51 @@ function logGeminiResponse(operation: string, response: unknown): void {
   console.dir(response, { depth: null });
 }
 
+function parseBootstrap(value: unknown): GameBootstrap {
+  const data = value as { people?: unknown; questions?: unknown } | null;
+  if (!data || !Array.isArray(data.people) || !Array.isArray(data.questions)) {
+    throw new GameAiError("初期ゲームデータの形式が不正です。");
+  }
+
+  const people = data.people.flatMap((person) => {
+    const candidate = person as { id?: unknown; name?: unknown; genre?: unknown; aliases?: unknown };
+    if (
+      typeof candidate.id !== "string" ||
+      !/^[a-z0-9-]+$/.test(candidate.id) ||
+      typeof candidate.name !== "string" ||
+      typeof candidate.genre !== "string" ||
+      !Array.isArray(candidate.aliases) ||
+      !candidate.aliases.every((alias) => typeof alias === "string")
+    ) return [];
+    return [{ id: candidate.id, name: candidate.name, genre: candidate.genre, aliases: candidate.aliases }];
+  });
+
+  const questions = data.questions.filter((question): question is string => typeof question === "string" && question.trim().length > 0);
+  if (people.length === 0 || questions.length === 0) throw new GameAiError("初期ゲームデータが不足しています。");
+  return { people, questions };
+}
+
 export class GeminiGameAiProvider implements GameAiProvider {
-  async chooseSubject(candidateIds: readonly string[]): Promise<string> {
+  async bootstrapGameData(): Promise<GameBootstrap> {
     const response = await getClient().models.generateContent({
       model: getModel(),
-      contents: `候補ID: ${candidateIds.join(", ")}`,
+      contents: "人物情報と質問一覧を作成してください。",
       config: {
-        systemInstruction: "あなたは逆アキネーターの出題係です。候補IDから1つをランダムに選び、指定JSONだけを返してください。",
+        systemInstruction: [
+          "あなたは逆アキネーターの初期データ作成係です。",
+          "世界的または日本で広く知られる実在人物を12人作成してください。",
+          "人物IDは英小文字・数字・ハイフンだけの一意なスラッグにしてください。",
+          "各人物には一般的に一意な別名だけを含めてください。",
+          "人物を特定するための、日本語の短い質問を30個作成してください。",
+          "質問は人物共通で使えるyes/no形式にしてください。",
+          "指定JSON以外を出力しません。",
+        ].join("\n"),
         responseMimeType: "application/json",
-        responseSchema: {
-          type: "object",
-          additionalProperties: false,
-          properties: { subjectId: { type: "string", enum: candidateIds } },
-          required: ["subjectId"],
-        },
+        responseSchema: bootstrapSchema,
       },
     });
-    logGeminiResponse("chooseSubject", response);
-    const subjectId = (parseJson(response.text) as { subjectId?: unknown } | null)?.subjectId;
-    if (typeof subjectId === "string" && candidateIds.includes(subjectId)) return subjectId;
-    throw new GameAiError("お題の選択に失敗しました。もう一度開始してください。");
+    logGeminiResponse("bootstrapGameData", response);
+    return parseBootstrap(parseJson(response.text));
   }
 
   async answerQuestion(context: QuestionContext): Promise<Answer> {

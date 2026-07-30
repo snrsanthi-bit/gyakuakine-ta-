@@ -27,8 +27,8 @@ export function getCandidateGenre(candidate: Candidate): string {
 export async function ensurePerson(candidate: Candidate): Promise<void> {
   await db.person.upsert({
     where: { id: candidate.id },
-    create: { id: candidate.id, name: candidate.name, genre: getCandidateGenre(candidate) },
-    update: { name: candidate.name, genre: getCandidateGenre(candidate) },
+    create: { id: candidate.id, name: candidate.name, genre: candidate.genre ?? getCandidateGenre(candidate) },
+    update: { name: candidate.name, genre: candidate.genre ?? getCandidateGenre(candidate) },
   });
 }
 

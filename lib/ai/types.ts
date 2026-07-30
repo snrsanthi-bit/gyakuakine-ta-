@@ -13,9 +13,21 @@ export type AliasContext = {
 
 export type AliasJudgement = "yes" | "no" | "unknown";
 
+export type BootstrapPerson = {
+  id: string;
+  name: string;
+  genre: string;
+  aliases: string[];
+};
+
+export type GameBootstrap = {
+  people: BootstrapPerson[];
+  questions: string[];
+};
+
 /** Vendor-neutral contract. Add another adapter without changing game logic. */
 export interface GameAiProvider {
-  chooseSubject(candidateIds: readonly string[]): Promise<string>;
+  bootstrapGameData(): Promise<GameBootstrap>;
   answerQuestion(context: QuestionContext): Promise<Answer>;
   judgeAlias(context: AliasContext): Promise<AliasJudgement>;
 }
