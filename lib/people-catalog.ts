@@ -15,6 +15,32 @@ function isValidPerson(person: BootstrapPerson): boolean {
   return /^[a-z0-9-]+$/.test(person.id) && Boolean(person.name.trim()) && Boolean(person.genre.trim());
 }
 
+function isUniqueConstraintError(error: unknown): boolean {
+  return (error as { code?: unknown })?.code === "P2002";
+}
+
+async function saveAliases(personId: string, aliases: string[], summary: PeopleCatalogSummary): Promise<void> {
+  const values = Array.from(new Set(aliases.map((alias) => alias.trim()).filter(Boolean)));
+  const aliasRows = values.flatMap((value) => {
+    const normalizedValue = normalizeName(value);
+    return normalizedValue ? [{ personId, value, normalizedValue }] : [];
+  });
+  if (aliasRows.length === 0) return;
+
+  const existing = await db.alias.findMany({
+    where: { normalizedValue: { in: aliasRows.map((alias) => alias.normalizedValue) } },
+    select: { normalizedValue: true },
+  });
+  const existingValues = new Set(existing.map((alias) => alias.normalizedValue));
+  const toCreate = aliasRows.filter((alias) => !existingValues.has(alias.normalizedValue));
+  summary.duplicateAliases += aliasRows.length - toCreate.length;
+  if (toCreate.length === 0) return;
+
+  const result = await db.alias.createMany({ data: toCreate, skipDuplicates: true });
+  summary.savedAliases += result.count;
+  summary.duplicateAliases += toCreate.length - result.count;
+}
+
 export async function savePeopleCatalog(people: BootstrapPerson[]): Promise<PeopleCatalogSummary> {
   const summary: PeopleCatalogSummary = {
     savedPeople: 0,
@@ -26,45 +52,41 @@ export async function savePeopleCatalog(people: BootstrapPerson[]): Promise<Peop
   const seenIds = new Set<string>();
   const seenNames = new Set<string>();
 
-  await db.$transaction(async (tx) => {
-    for (const person of people) {
-      const normalizedName = normalizeName(person.name);
-      if (!isValidPerson(person) || !normalizedName || seenIds.has(person.id) || seenNames.has(normalizedName)) {
-        summary.skippedPeople += 1;
-        continue;
-      }
-      seenIds.add(person.id);
-      seenNames.add(normalizedName);
+  for (const person of people) {
+    const normalizedName = normalizeName(person.name);
+    if (!isValidPerson(person) || !normalizedName || seenIds.has(person.id) || seenNames.has(normalizedName)) {
+      summary.skippedPeople += 1;
+      continue;
+    }
+    seenIds.add(person.id);
+    seenNames.add(normalizedName);
 
-      const existingPerson = await tx.person.findFirst({
-        where: { OR: [{ id: person.id }, { name: person.name }] },
-        select: { id: true },
-      });
-      if (existingPerson) {
+    let personId = person.id;
+    const existingPerson = await db.person.findFirst({
+      where: { OR: [{ id: person.id }, { name: person.name }] },
+      select: { id: true },
+    });
+    if (existingPerson) {
+      personId = existingPerson.id;
+      summary.duplicatePeople += 1;
+    } else {
+      try {
+        await db.person.create({ data: { id: person.id, name: person.name, genre: person.genre } });
+        summary.savedPeople += 1;
+      } catch (error) {
+        if (!isUniqueConstraintError(error)) throw error;
+        const concurrentPerson = await db.person.findFirst({
+          where: { OR: [{ id: person.id }, { name: person.name }] },
+          select: { id: true },
+        });
+        if (!concurrentPerson) throw error;
+        personId = concurrentPerson.id;
         summary.duplicatePeople += 1;
-        continue;
-      }
-
-      await tx.person.create({ data: { id: person.id, name: person.name, genre: person.genre } });
-      summary.savedPeople += 1;
-
-      const aliases = Array.from(new Set([person.name, ...person.aliases].map((alias) => alias.trim()).filter(Boolean)));
-      for (const value of aliases) {
-        const normalizedValue = normalizeName(value);
-        if (!normalizedValue) {
-          summary.skippedPeople += 1;
-          continue;
-        }
-        const existingAlias = await tx.alias.findUnique({ where: { normalizedValue }, select: { id: true } });
-        if (existingAlias) {
-          summary.duplicateAliases += 1;
-          continue;
-        }
-        await tx.alias.create({ data: { personId: person.id, value, normalizedValue } });
-        summary.savedAliases += 1;
       }
     }
-  });
+
+    await saveAliases(personId, [person.name, ...person.aliases], summary);
+  }
 
   return summary;
 }
