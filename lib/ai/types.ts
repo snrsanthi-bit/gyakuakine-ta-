@@ -28,6 +28,7 @@ export type GameBootstrap = {
 /** Vendor-neutral contract. Add another adapter without changing game logic. */
 export interface GameAiProvider {
   bootstrapGameData(): Promise<GameBootstrap>;
+  generatePeopleCatalog(count: number): Promise<BootstrapPerson[]>;
   answerQuestion(context: QuestionContext): Promise<Answer>;
   judgeAlias(context: AliasContext): Promise<AliasJudgement>;
 }
