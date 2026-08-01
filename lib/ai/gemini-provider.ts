@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { parseAiAnswer, type Answer } from "@/lib/validation";
-import { GameAiError, type AliasContext, type AliasJudgement, type GameAiProvider, type GameBootstrap, type QuestionContext } from "@/lib/ai/types";
+import { GameAiError, type AliasContext, type AliasJudgement, type BootstrapPerson, type GameAiProvider, type GameBootstrap, type QuestionContext } from "@/lib/ai/types";
 
 const answerSchema = {
   type: "object",
@@ -14,6 +14,28 @@ const aliasJudgementSchema = {
   additionalProperties: false,
   properties: { judgement: { type: "string", enum: ["yes", "no", "unknown"] } },
   required: ["judgement"],
+};
+
+const peopleCatalogSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    people: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          id: { type: "string" },
+          name: { type: "string" },
+          genre: { type: "string" },
+          aliases: { type: "array", items: { type: "string" } },
+        },
+        required: ["id", "name", "genre", "aliases"],
+      },
+    },
+  },
+  required: ["people"],
 };
 
 const bootstrapSchema = {
@@ -103,6 +125,32 @@ export class GeminiGameAiProvider implements GameAiProvider {
     });
     logGeminiResponse("bootstrapGameData", response);
     return parseBootstrap(parseJson(response.text));
+  }
+
+  async generatePeopleCatalog(count: number): Promise<BootstrapPerson[]> {
+    const response = await getClient().models.generateContent({
+      model: getModel(),
+      contents: `実在人物を${count}人生成してください。`,
+      config: {
+        systemInstruction: [
+          "あなたは逆アキネーターの人物カタログ作成係です。",
+          "世界的または日本で広く知られる実在人物を、指定人数だけ生成してください。",
+          "ジャンルは歴史、科学、芸術、スポーツ、政治、経済、音楽、映画、アニメ・漫画、ITに偏らないよう分散してください。",
+          "人物IDは英小文字・数字・ハイフンだけの一意なスラッグにしてください。",
+          "aliasesには一般的かつ一意に人物を指す呼称だけを含めてください。",
+          "質問は生成しません。指定JSON以外を出力しません。",
+        ].join("\n"),
+        responseMimeType: "application/json",
+        responseSchema: peopleCatalogSchema,
+      },
+    });
+    logGeminiResponse("generatePeopleCatalog", response);
+    const data = parseJson(response.text) as { people?: unknown } | null;
+    const people = parseBootstrap({ people: data?.people, questions: ["placeholder"] }).people;
+    if (people.length < 50 || people.length > 100) {
+      throw new GameAiError(`人物カタログの件数が不正です: ${people.length}`);
+    }
+    return people;
   }
 
   async answerQuestion(context: QuestionContext): Promise<Answer> {
